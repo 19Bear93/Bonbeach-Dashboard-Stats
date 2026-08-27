@@ -1,0 +1,112 @@
+# Bonbeach CC — Live Milestone Tracker
+
+This repo pulls live stats from PlayHQ and rebuilds a milestone dashboard,
+automatically, once a day, and publishes it as a website via GitHub Pages.
+
+---
+
+## How it works
+
+- `fetch_playhq_data.py` talks to the PlayHQ API, walks every season/grade/
+  game for Bonbeach CC, and aggregates career batting/bowling/fielding stats
+  into `players_data.json`.
+- `build_dashboard.py` injects that data into `dashboard_template.html` and
+  writes two identical output files: `Bonbeach-CC-Milestone-Dashboard-LIVE.html`
+  (a friendly name) and `index.html` (so GitHub Pages shows it at your site's
+  base URL automatically).
+- `.github/workflows/update-dashboard.yml` runs both scripts once a day
+  (early morning) and whenever you trigger it manually, then commits the
+  regenerated HTML back to this repo — which GitHub Pages then serves.
+
+**Important limitation:** PlayHQ's API only has this club's data back to
+Summer 2023/24 — that's when Bonbeach's competitions started being recorded
+in PlayHQ at all, confirmed directly on PlayHQ's own public club page. If you
+need full historical career stats (players with 100+ matches going back
+further), those live in the separate CSV-based dataset, not in what this
+live pipeline can pull. This pipeline is for keeping *current* seasons fresh
+automatically, not for replacing older history.
+
+---
+
+## One-time setup (things only you can do — GitHub account required)
+
+Claude Code prepared all the code and the automation, but creating things in
+*your* GitHub account has to be done by you. Checklist:
+
+1. **Create a new GitHub repository** (public or private, your call — since
+   credentials are no longer in the code, it's safe to make it public).
+   Don't initialize it with a README (this folder already has one).
+2. **Push this folder to it.** From a terminal in this folder:
+   ```
+   git remote add origin https://github.com/<your-username>/<your-repo>.git
+   git branch -M main
+   git push -u origin main
+   ```
+3. **Add three repository secrets** (Settings -> Secrets and variables ->
+   Actions -> New repository secret):
+   - `PLAYHQ_API_KEY`
+   - `PLAYHQ_ORG_ID`
+   - `PLAYHQ_TENANT` (value: `ca`)
+   (Ask Claude, in this conversation, for the actual key/org-ID values if you
+   need them again — they're not stored in any file anymore.)
+4. **Enable GitHub Pages** (Settings -> Pages):
+   - Source: **Deploy from a branch**
+   - Branch: **main**, folder: **/ (root)**
+   - Save. GitHub will show you the live URL (something like
+     `https://<your-username>.github.io/<your-repo>/`). It'll 404 until step 5.
+5. **Trigger the workflow once manually** to populate the site immediately,
+   rather than waiting for tomorrow's scheduled run: go to the **Actions**
+   tab -> **Update Bonbeach Milestone Dashboard** -> **Run workflow**. After
+   it finishes (~1-2 minutes), refresh the Pages URL from step 4.
+
+That's it — from here on, it updates itself daily.
+
+---
+
+## Running it yourself locally (optional)
+
+You don't need to do this if the GitHub Actions automation above is set up —
+it's only useful for testing changes to the scripts before pushing.
+
+1. Install Python from https://www.python.org/downloads/ (tick "Add to PATH"
+   during install on Windows), then `pip install requests`.
+2. Set the credentials as environment variables (PowerShell example):
+   ```
+   $env:PLAYHQ_API_KEY = "your-key-here"
+   $env:PLAYHQ_ORG_ID  = "your-org-id-here"
+   ```
+   (`PLAYHQ_TENANT` defaults to `ca` if not set.)
+3. Run `python fetch_playhq_data.py`, then `python build_dashboard.py`.
+4. Open `index.html` in your browser.
+
+---
+
+## If something goes wrong
+
+PlayHQ's API is well-documented but real-world data occasionally has small
+surprises (a missing field, an unexpected status value, an endpoint that's
+moved — this has already happened once: `/v2/grades/{id}/fixture` silently
+became `/v2/grades/{id}/games`). If a scheduled or manual run fails, check
+the Actions tab for the error log, and bring the error text back to Claude —
+it can usually diagnose and fix the script directly.
+
+## What this does NOT do
+
+- It only counts matches marked `FINAL` in PlayHQ (in-progress, abandoned,
+  and cancelled games are skipped).
+- It can't see anything before Summer 2023/24 (see the limitation note above).
+
+## Files in this folder
+
+| File | What it is |
+|---|---|
+| `fetch_playhq_data.py` | Talks to PlayHQ, downloads every Bonbeach game, aggregates stats. Reads credentials from environment variables — no secrets in this file. |
+| `build_dashboard.py` | Injects the fresh data into the dashboard template |
+| `dashboard_template.html` | The dashboard design/logic (don't need to touch this) |
+| `.github/workflows/update-dashboard.yml` | The daily automation |
+| `players_data.json` | Generated, gitignored — the aggregated stats, machine-readable |
+| `Bonbeach-CC-Milestone-Dashboard-LIVE.html` / `index.html` | Generated, **committed** (see note below) — open either in your browser, or visit the live GitHub Pages URL |
+
+**Note on `index.html`:** unlike `players_data.json`, this one *is* meant to
+be committed — GitHub Pages serves it directly, and the daily workflow
+updates it in place each run.
