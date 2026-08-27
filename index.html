@@ -151,15 +151,15 @@ Z.prototype.chain=tf,Z.prototype.commit=rf,Z.prototype.next=ef,Z.prototype.plant
 </script>
 <style>
   :root{
-    --black:#0A0A0B;
-    --panel:#141416;
-    --panel-2:#1B1B1E;
-    --line:#2A2A2E;
-    --white:#F7F6F2;
-    --steel:#8B8D93;
-    --red:#D91E36;
-    --red-deep:#7A0F1F;
-    --red-glow:#FF3B52;
+    --black:#000000;
+    --panel:#141414;
+    --panel-2:#1C1C1C;
+    --line:#2B2B2B;
+    --white:#FFFFFF;
+    --steel:#9A9A9A;
+    --red:#DF3E46;
+    --red-deep:#8F2126;
+    --red-glow:#FF6169;
     --amber:#E8B84B;
   }
   *{box-sizing:border-box;}
@@ -168,8 +168,8 @@ Z.prototype.chain=tf,Z.prototype.commit=rf,Z.prototype.next=ef,Z.prototype.plant
     font-family:'Inter',sans-serif;
     -webkit-font-smoothing:antialiased;
     background:
-      radial-gradient(circle at 15% 0%, rgba(217,30,54,0.12), transparent 45%),
-      radial-gradient(circle at 90% 10%, rgba(217,30,54,0.06), transparent 40%),
+      radial-gradient(circle at 15% 0%, rgba(223,62,70,0.12), transparent 45%),
+      radial-gradient(circle at 90% 10%, rgba(223,62,70,0.06), transparent 40%),
       var(--black);
     min-height:100vh;
   }
@@ -186,7 +186,7 @@ Z.prototype.chain=tf,Z.prototype.commit=rf,Z.prototype.next=ef,Z.prototype.plant
     padding-bottom:22px;border-bottom:1px solid var(--line);margin-bottom:28px;
   }
   .brand{display:flex;align-items:center;gap:14px;}
-  .fin{width:52px;height:52px;flex-shrink:0;object-fit:contain;border-radius:10px;}
+  .fin{width:88px;height:88px;flex-shrink:0;object-fit:contain;border-radius:14px;}
   .brand h1{
     font-family:'Teko',sans-serif;font-weight:700;letter-spacing:0.5px;
     font-size:34px;line-height:1;margin:0;color:var(--white);
@@ -288,8 +288,8 @@ Z.prototype.chain=tf,Z.prototype.commit=rf,Z.prototype.next=ef,Z.prototype.plant
   thead th.sorted{color:var(--red-glow);}
   thead th .arrow{font-size:9px;margin-left:3px;opacity:.8;}
   tbody tr{border-bottom:1px solid var(--line);cursor:pointer;transition:background .1s;}
-  tbody tr:hover{background:rgba(217,30,54,0.08);}
-  tbody tr.watch-row{background:rgba(217,30,54,0.05);}
+  tbody tr:hover{background:rgba(223,62,70,0.08);}
+  tbody tr.watch-row{background:rgba(223,62,70,0.05);}
   tbody td{padding:10px 12px;font-size:13px;white-space:nowrap;}
   td.name-cell{font-weight:600;color:var(--white);}
   td.num{font-family:'Roboto Mono',monospace;color:#D8D8D5;}
