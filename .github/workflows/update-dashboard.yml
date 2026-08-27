@@ -1,4 +1,4 @@
-  name: Update Bonbeach Milestone Dashboard
+name: Update Bonbeach Milestone Dashboard
 
 # Runs automatically once a day, and can also be triggered manually from the
 # Actions tab (Run workflow button) or via `gh workflow run`.
