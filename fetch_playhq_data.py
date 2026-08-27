@@ -234,6 +234,34 @@ def stat_value(stat_list, stat_type, default=0):
     return default
 
 
+def gentle_capitalize(s):
+    """Capitalise the first letter after each word boundary (space, hyphen,
+    apostrophe) WITHOUT touching any other letter's existing case. Fixes
+    "jamie" -> "Jamie" while leaving names like "MacKessack" or "O'Connor"
+    completely untouched (unlike str.title(), which mangles them).
+    """
+    if not s:
+        return s
+    out = []
+    capitalize_next = True
+    for ch in s:
+        if capitalize_next and ch.isalpha():
+            out.append(ch.upper())
+            capitalize_next = False
+        else:
+            out.append(ch)
+        if ch in " -'":
+            capitalize_next = True
+    return "".join(out)
+
+
+def player_key(last, first):
+    """Case-insensitive matching key so e.g. PlayHQ returning 'jamie' one game
+    and 'Jamie' another never splits one real player into two entries. Must
+    match the key format baseline/player_totals.json was built with."""
+    return f"{last}, {first}".strip(", ").lower()
+
+
 def process_game_summary(summary, bonbeach_team_ids, players):
     if not summary:
         return
@@ -261,9 +289,13 @@ def process_game_summary(summary, bonbeach_team_ids, players):
                 first, last = info.get("firstName", ""), info.get("lastName", "")
                 if not first and not last:
                     continue  # skip anonymous/fill-in placeholders with no name
-                key = f"{last}, {first}".strip(", ")
+                key = player_key(last, first)
                 p = players.setdefault(key, blank_player())
-                p["first_name"], p["last_name"] = first, last
+                # Keep the first non-blank, gently-capitalised name we saw rather than
+                # overwriting every game — avoids flip-flopping display casing if PlayHQ
+                # returns inconsistent casing for the same player across games.
+                if not p["first_name"] and not p["last_name"]:
+                    p["first_name"], p["last_name"] = gentle_capitalize(first), gentle_capitalize(last)
                 p["matches_set"].add(game_id)
 
                 stats = appearance.get("statistics", []) or []
@@ -473,16 +505,17 @@ def apply_milestones(players):
             n += increment
         return n
 
-    MATCH_TIERS = [50, 100, 150, 200, 250]
-    RUN_TIERS = [500, 1000, 2500, 5000]
-    WICKET_TIERS = [50, 100, 250, 500]
-    CATCH_TIERS = [25, 50, 100]
+    MATCH_TIERS = [100, 150, 200, 250, 300, 350, 400, 450, 500]
+    RUN_TIERS = [500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000,
+                 5500, 6000, 6500, 7000, 7500, 8000, 8500, 9000, 9500, 10000]
+    WICKET_TIERS = [100, 150, 200, 250, 300, 350, 400, 450, 500, 550]
+    CATCH_TIERS = [100, 150, 200, 250, 300, 350, 400, 450, 500]
     WATCH = {"matches": 5, "runs": 100, "wickets": 10}
 
     for p in players:
         nm = next_milestone(p["matches"], MATCH_TIERS, 50)
-        nr = next_milestone(p["runs"], RUN_TIERS, 2500)
-        nw = next_milestone(p["wickets"], WICKET_TIERS, 250)
+        nr = next_milestone(p["runs"], RUN_TIERS, 500)
+        nw = next_milestone(p["wickets"], WICKET_TIERS, 50)
         nc = next_milestone(p["total_catches"], CATCH_TIERS, 50)
 
         p["next_match_milestone"] = nm
