@@ -3,6 +3,11 @@
 players_data.json
 _playhq_raw_cache.json
 
+# NOTE: baseline/player_totals.json and baseline/counted_game_ids.json are
+# NOT gitignored on purpose — they ARE the club's permanent career-history
+# record and must be committed every run so nothing is ever lost or
+# double-counted. Do not add them here.
+
 # Local credential files — never commit real API keys.
 .env
 .env.*

@@ -8,23 +8,40 @@ automatically, once a day, and publishes it as a website via GitHub Pages.
 ## How it works
 
 - `fetch_playhq_data.py` talks to the PlayHQ API, walks every season/grade/
-  game for Bonbeach CC, and aggregates career batting/bowling/fielding stats
-  into `players_data.json`.
+  game for Bonbeach CC, and finds any games not yet reflected in the
+  baseline (see below). It aggregates just those NEW games, folds them into
+  the career-long baseline totals, and writes the combined result to
+  `players_data.json`.
 - `build_dashboard.py` injects that data into `dashboard_template.html` and
   writes two identical output files: `Bonbeach-CC-Milestone-Dashboard-LIVE.html`
   (a friendly name) and `index.html` (so GitHub Pages shows it at your site's
   base URL automatically).
 - `.github/workflows/update-dashboard.yml` runs both scripts once a day
   (early morning) and whenever you trigger it manually, then commits the
-  regenerated HTML back to this repo — which GitHub Pages then serves.
+  regenerated HTML (and the updated baseline files) back to this repo —
+  which GitHub Pages then serves.
 
-**Important limitation:** PlayHQ's API only has this club's data back to
-Summer 2023/24 — that's when Bonbeach's competitions started being recorded
-in PlayHQ at all, confirmed directly on PlayHQ's own public club page. If you
-need full historical career stats (players with 100+ matches going back
-further), those live in the separate CSV-based dataset, not in what this
-live pipeline can pull. This pipeline is for keeping *current* seasons fresh
-automatically, not for replacing older history.
+### Full career history — the `baseline/` files
+
+PlayHQ's API only has this club's data back to Summer 2023/24 — that's when
+Bonbeach's competitions started being recorded in PlayHQ at all, confirmed
+directly on PlayHQ's own public club page. To show the dashboard's real,
+full career history (players with 100+ matches going back decades), this
+pipeline keeps two extra files:
+
+- `baseline/player_totals.json` — every player's career totals to date,
+  originally built from the club's CSV exports and updated automatically
+  after that.
+- `baseline/counted_game_ids.json` — the list of PlayHQ game IDs already
+  folded into the totals above, so a game is never counted twice.
+
+Every run, `fetch_playhq_data.py` only downloads and adds games whose ID
+isn't already in that list, then updates both files. **These two files are
+the club's permanent record — they must stay committed to the repo (the
+workflow does this for you automatically) and should never be manually
+deleted or hand-edited.** If they ever go missing, the dashboard will fall
+back to only showing PlayHQ-era data (2023/24 onward) until they're
+restored from a backup or rebuilt from the CSV exports.
 
 ---
 
@@ -94,17 +111,21 @@ it can usually diagnose and fix the script directly.
 
 - It only counts matches marked `FINAL` in PlayHQ (in-progress, abandoned,
   and cancelled games are skipped).
-- It can't see anything before Summer 2023/24 (see the limitation note above).
+- It can't independently discover history before Summer 2023/24 from
+  PlayHQ — that part comes from the `baseline/` files (see above), so keep
+  those committed.
 
 ## Files in this folder
 
 | File | What it is |
 |---|---|
-| `fetch_playhq_data.py` | Talks to PlayHQ, downloads every Bonbeach game, aggregates stats. Reads credentials from environment variables — no secrets in this file. |
+| `fetch_playhq_data.py` | Talks to PlayHQ, downloads new Bonbeach games, merges them into the baseline. Reads credentials from environment variables — no secrets in this file. |
 | `build_dashboard.py` | Injects the fresh data into the dashboard template |
 | `dashboard_template.html` | The dashboard design/logic (don't need to touch this) |
 | `.github/workflows/update-dashboard.yml` | The daily automation |
-| `players_data.json` | Generated, gitignored — the aggregated stats, machine-readable |
+| `baseline/player_totals.json` | **Committed** — full career totals per player. This is the club's permanent record; never delete or hand-edit it. |
+| `baseline/counted_game_ids.json` | **Committed** — PlayHQ game IDs already counted, so games are never double-counted. |
+| `players_data.json` | Generated, gitignored — the combined (baseline + new PlayHQ games) stats, machine-readable |
 | `Bonbeach-CC-Milestone-Dashboard-LIVE.html` / `index.html` | Generated, **committed** (see note below) — open either in your browser, or visit the live GitHub Pages URL |
 
 **Note on `index.html`:** unlike `players_data.json`, this one *is* meant to

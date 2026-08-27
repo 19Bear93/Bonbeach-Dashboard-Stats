@@ -7,9 +7,32 @@ WHAT THIS SCRIPT DOES
 ----------------------
 1. Connects to the PlayHQ public API using your club's credentials.
 2. Walks: Organisation -> Seasons -> Teams (filtered to Bonbeach CC) -> Grades -> Fixtures -> Games.
-3. Downloads the full scorecard for every Bonbeach game it finds.
-4. Aggregates every player's career Batting / Bowling / Fielding stats across all those games.
-5. Writes out `players_data.json` in the exact format the milestone dashboard expects.
+3. Skips any game whose ID is already recorded in baseline/counted_game_ids.json
+   (games already reflected in the historical baseline, or already pulled in on
+   a previous run).
+4. Downloads the full scorecard for every remaining (new) Bonbeach game.
+5. Aggregates the new games' Batting / Bowling / Fielding stats, then folds
+   them into baseline/player_totals.json (the club's full career history,
+   originally built from CSV exports going back decades) — so the output
+   always reflects FULL history, not just what's in PlayHQ.
+6. Writes out `players_data.json` in the exact format the milestone dashboard
+   expects, and writes back the updated baseline files so nothing is ever
+   double-counted on future runs.
+
+FULL CAREER HISTORY — HOW THE BASELINE WORKS
+-----------------------------------------------
+PlayHQ's own API only has this club's data back to Summer 2023/24. To show
+full career history, this script maintains two extra files under baseline/:
+
+    baseline/player_totals.json    Raw per-player career totals (career-to-date)
+    baseline/counted_game_ids.json List of PlayHQ game IDs already folded in
+
+Every run: any PlayHQ game whose ID is NOT yet in counted_game_ids.json gets
+aggregated and merged into player_totals.json, then that game's ID is added
+to counted_game_ids.json so it's never counted twice. This means these two
+baseline files are the club's permanent record — they must be committed to
+the repo (the GitHub Actions workflow does this automatically) and should
+never be manually deleted or hand-edited.
 
   CREDENTIALS — READ FROM ENVIRONMENT VARIABLES, NOT HARDCODED
 -----------------------------------------------------------------
@@ -73,6 +96,12 @@ CLUB_NAME_MATCH = "bonbeach"  # used as a fallback text match on club name, lowe
 OUTPUT_FILE = "players_data.json"
 CACHE_FILE = "_playhq_raw_cache.json"   # lets you resume/re-run without re-downloading everything
 REQUEST_DELAY_SECONDS = 0.25            # be polite to PlayHQ's servers between calls
+
+# Full-career-history baseline (see docstring above). These two files are the
+# club's permanent record and ARE committed to the repo — do not gitignore
+# them and do not hand-edit them.
+BASELINE_TOTALS_FILE = "baseline/player_totals.json"
+BASELINE_GAME_IDS_FILE = "baseline/counted_game_ids.json"
 
 HEADERS = {
     "x-api-key": X_API_KEY,
@@ -192,7 +221,7 @@ def blank_player():
         "innings": 0, "not_outs": 0, "runs": 0, "high_score": 0, "high_score_not_out": False,
         "hundreds": 0, "fifties": 0, "balls_faced": 0,
         "wickets": 0, "runs_conceded": 0, "balls_bowled": 0, "best_w": 0, "best_r": 0, "five_wkts": 0,
-        "total_catches": 0, "stumpings": 0, "run_outs": 0,
+        "catches_wk": 0, "catches_nwk": 0, "stumpings": 0, "run_outs": 0,
         "first_name": "", "last_name": "",
     }
 
@@ -275,20 +304,117 @@ def process_game_summary(summary, bonbeach_team_ids, players):
                         elif wkts > p["best_w"] or (wkts == p["best_w"] and runs_c < p["best_r"]):
                             p["best_w"], p["best_r"] = wkts, runs_c
 
-                    # Fielding stats live inside the bowling-team block (they were fielding)
-                    p["total_catches"] += stat_value(stats, "TOTAL_CATCHES")
+                    # Fielding stats live inside the bowling-team block (they were fielding).
+                    # PlayHQ separates wicket-keeper catches from other catches, matching the
+                    # split already present in the historical CSV baseline (catches_wk/catches_nwk).
+                    p["catches_wk"] += stat_value(stats, "CATCHES_AS_WICKET_KEEPER")
+                    p["catches_nwk"] += stat_value(stats, "CATCHES_AS_FIELDER")
                     p["stumpings"] += stat_value(stats, "STUMPINGS")
                     p["run_outs"] += stat_value(stats, "TOTAL_RUN_OUTS")
 
 
 # =========================================================================
-# Step 6: Build final output matching the dashboard's expected schema
+# Step 6: Full-career-history baseline — load, merge, save
 # =========================================================================
 
-def finalize(players):
+def blank_baseline_entry():
+    return {
+        "first_name": "", "last_name": "",
+        "matches": 0, "innings": 0, "not_outs": 0, "runs": 0,
+        "high_score": 0, "high_score_not_out": False,
+        "hundreds": 0, "fifties": 0, "balls_faced": 0,
+        "wickets": 0, "runs_conceded": 0, "balls_bowled": 0,
+        "best_w": 0, "best_r": 0, "five_wkts": 0,
+        "catches_wk": 0, "catches_nwk": 0, "stumpings": 0, "run_outs": 0,
+    }
+
+
+def load_baseline_totals():
+    try:
+        with open(BASELINE_TOTALS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"  NOTE: {BASELINE_TOTALS_FILE} not found — starting with an empty baseline "
+              f"(dashboard will only show PlayHQ-era data until it's restored).")
+        return {}
+
+
+def load_counted_game_ids():
+    try:
+        with open(BASELINE_GAME_IDS_FILE, "r", encoding="utf-8") as f:
+            return set(json.load(f))
+    except FileNotFoundError:
+        print(f"  NOTE: {BASELINE_GAME_IDS_FILE} not found — starting with no games counted "
+              f"(every PlayHQ game found this run will be treated as new).")
+        return set()
+
+
+def save_baseline_totals(baseline_totals):
+    with open(BASELINE_TOTALS_FILE, "w", encoding="utf-8") as f:
+        json.dump(baseline_totals, f, indent=None)
+
+
+def save_counted_game_ids(counted_game_ids):
+    with open(BASELINE_GAME_IDS_FILE, "w", encoding="utf-8") as f:
+        json.dump(sorted(counted_game_ids), f, indent=None)
+
+
+def merge_into_baseline(baseline_totals, live_deltas):
+    """Fold this run's newly-crawled PlayHQ games into the career-long baseline totals.
+
+    live_deltas is the `players` dict built by process_game_summary() during this
+    run — i.e. ONLY stats from games not already in counted_game_ids.json.
+    """
+    for key, delta in live_deltas.items():
+        delta_matches = len(delta["matches_set"])
+        if delta_matches == 0:
+            continue
+
+        b = baseline_totals.setdefault(key, blank_baseline_entry())
+
+        # Prefer names already on file (CSV baseline names are the authoritative
+        # spelling); only take PlayHQ's name for brand-new players not yet seen.
+        if not b["first_name"] and not b["last_name"]:
+            b["first_name"], b["last_name"] = delta["first_name"], delta["last_name"]
+
+        b["matches"] += delta_matches
+        b["innings"] += delta["innings"]
+        b["not_outs"] += delta["not_outs"]
+        b["runs"] += delta["runs"]
+        b["hundreds"] += delta["hundreds"]
+        b["fifties"] += delta["fifties"]
+        b["balls_faced"] += delta["balls_faced"]
+        b["wickets"] += delta["wickets"]
+        b["runs_conceded"] += delta["runs_conceded"]
+        b["balls_bowled"] += delta["balls_bowled"]
+        b["five_wkts"] += delta["five_wkts"]
+        b["catches_wk"] += delta["catches_wk"]
+        b["catches_nwk"] += delta["catches_nwk"]
+        b["stumpings"] += delta["stumpings"]
+        b["run_outs"] += delta["run_outs"]
+
+        if delta["high_score"] > b["high_score"]:
+            b["high_score"] = delta["high_score"]
+            b["high_score_not_out"] = delta["high_score_not_out"]
+
+        dw, dr = delta["best_w"], delta["best_r"]
+        if dw > 0 or dr > 0:  # delta actually took a wicket-bearing spell worth comparing
+            if b["best_w"] == 0 and b["best_r"] == 0:
+                b["best_w"], b["best_r"] = dw, dr
+            elif dw > b["best_w"] or (dw == b["best_w"] and dr < b["best_r"]):
+                b["best_w"], b["best_r"] = dw, dr
+
+    return baseline_totals
+
+
+# =========================================================================
+# Step 7: Build final output matching the dashboard's expected schema
+# =========================================================================
+
+def finalize(baseline_totals):
     output = []
-    for key, p in players.items():
-        matches = len(p["matches_set"])
+    for key, p in baseline_totals.items():
+        matches = p["matches"]
         if matches == 0:
             continue
         denom = p["innings"] - p["not_outs"]
@@ -298,10 +424,11 @@ def finalize(players):
         best_figures = f"{int(p['best_w'])}-{int(p['best_r'])}" if (p["wickets"] > 0 or p["balls_bowled"] > 0) else "0-0"
 
         display_name = f"{p['first_name']} {p['last_name']}".strip()
+        total_catches = int(p["catches_wk"]) + int(p["catches_nwk"])
         record = {
             "name": key,
             "display_name": display_name if display_name else key,
-            "matches": matches,
+            "matches": int(matches),
             "runs": int(p["runs"]),
             "innings": int(p["innings"]),
             "not_outs": int(p["not_outs"]),
@@ -316,9 +443,9 @@ def finalize(players):
             "five_wkts": int(p["five_wkts"]),
             "bowl_average": bowl_avg,
             "economy": economy,
-            "total_catches": int(p["total_catches"]),
-            "catches_wk": 0,   # not separated in v2 summary without deeper per-position parsing
-            "catches_nwk": int(p["total_catches"]),
+            "total_catches": total_catches,
+            "catches_wk": int(p["catches_wk"]),
+            "catches_nwk": int(p["catches_nwk"]),
             "stumpings": int(p["stumpings"]),
             "run_outs": int(p["run_outs"]),
         }
@@ -389,8 +516,13 @@ def main():
         print("No seasons found — check your Organisation ID and credentials.")
         sys.exit(1)
 
-    players = {}
+    baseline_totals = load_baseline_totals()
+    counted_game_ids = load_counted_game_ids()
+    print(f"Baseline: {len(baseline_totals)} players, {len(counted_game_ids)} games already counted")
+
+    players = {}       # NEW games only, this run
     games_processed = 0
+    games_new_ids = set()
     games_seen = set()
 
     for season in seasons:
@@ -422,24 +554,35 @@ def main():
                     continue
                 games_seen.add(game_id)
 
+                if game_id in counted_game_ids:
+                    continue  # already folded into the baseline on a previous run
+
                 summary = get_game_summary(game_id)
                 time.sleep(REQUEST_DELAY_SECONDS)
                 if summary:
                     process_game_summary(summary, bonbeach_team_ids, players)
+                    games_new_ids.add(game_id)
                     games_processed += 1
                     if games_processed % 25 == 0:
-                        print(f"      ...{games_processed} games processed so far")
+                        print(f"      ...{games_processed} new games processed so far")
 
-    print(f"\nTotal Bonbeach games processed: {games_processed}")
-    print(f"Total players found: {len(players)}")
+    print(f"\nNew Bonbeach games this run: {games_processed}")
+    print(f"Players with new activity this run: {len(players)}")
 
-    output = finalize(players)
+    baseline_totals = merge_into_baseline(baseline_totals, players)
+    counted_game_ids |= games_new_ids
+
+    output = finalize(baseline_totals)
     output = apply_milestones(output)
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump(output, f, indent=None)
 
-    print(f"\nDone! Wrote {len(output)} players to {OUTPUT_FILE}")
+    save_baseline_totals(baseline_totals)
+    save_counted_game_ids(counted_game_ids)
+
+    print(f"\nDone! Wrote {len(output)} players (full career history) to {OUTPUT_FILE}")
+    print(f"Baseline now covers {len(counted_game_ids)} games and {len(baseline_totals)} players.")
     print(f"Last updated: {datetime.now().strftime('%d %b %Y %H:%M')}")
     print("\nNext step: run  python build_dashboard.py")
 
