@@ -1,4 +1,4 @@
-name: Update Bonbeach Milestone Dashboard
+  name: Update Bonbeach Milestone Dashboard
 
 # Runs automatically once a day, and can also be triggered manually from the
 # Actions tab (Run workflow button) or via `gh workflow run`.
@@ -42,4 +42,4 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Auto-update milestone dashboard [skip ci]"
-          file_pattern: "index.html Bonbeach-CC-Milestone-Dashboard-LIVE.html"
+          file_pattern: "index.html Bonbeach-CC-Milestone-Dashboard-LIVE.html baseline/player_totals.json baseline/counted_game_ids.json milestones/milestones_log.json"       
