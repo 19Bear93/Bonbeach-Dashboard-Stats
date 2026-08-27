@@ -334,9 +334,13 @@ def load_baseline_totals():
         with open(BASELINE_TOTALS_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except FileNotFoundError:
-        print(f"  NOTE: {BASELINE_TOTALS_FILE} not found — starting with an empty baseline "
-              f"(dashboard will only show PlayHQ-era data until it's restored).")
-        return {}
+        print(f"ERROR: {BASELINE_TOTALS_FILE} was not found in this checkout.")
+        print("This file holds the club's full career history (decades of CSV-sourced")
+        print("stats) and must be committed to the repo at all times — see the README's")
+        print("'Full career history' section. Stopping now rather than silently building")
+        print("a dashboard with only partial (PlayHQ-era) data. Re-add this file (from a")
+        print("backup, or by re-uploading it) and try again.")
+        sys.exit(1)
 
 
 def load_counted_game_ids():
@@ -344,9 +348,11 @@ def load_counted_game_ids():
         with open(BASELINE_GAME_IDS_FILE, "r", encoding="utf-8") as f:
             return set(json.load(f))
     except FileNotFoundError:
-        print(f"  NOTE: {BASELINE_GAME_IDS_FILE} not found — starting with no games counted "
-              f"(every PlayHQ game found this run will be treated as new).")
-        return set()
+        print(f"ERROR: {BASELINE_GAME_IDS_FILE} was not found in this checkout.")
+        print("Without this file every PlayHQ game would look 'new' and get double-counted")
+        print("on top of the baseline totals. Stopping now rather than risking corrupted")
+        print("stats. Re-add this file (from a backup, or by re-uploading it) and try again.")
+        sys.exit(1)
 
 
 def save_baseline_totals(baseline_totals):
