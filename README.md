@@ -43,6 +43,20 @@ deleted or hand-edited.** If they ever go missing, the dashboard will fall
 back to only showing PlayHQ-era data (2023/24 onward) until they're
 restored from a backup or rebuilt from the CSV exports.
 
+### Milestones Reached — the `milestones/` folder
+
+Every run, the pipeline compares each active player's stats before and
+after that run's new games are folded in, and records any milestone tier
+(Matches, Runs, Wickets or Catches) they crossed as a result. That record
+is kept forever in `milestones/milestones_log.json` and shown on the
+dashboard under **"🎉 Milestones Reached"** — a rolling view of the last
+30 days, so a milestone reached, say, last week is still visible next time
+someone opens the site, not just on the day it happened. **This file should
+stay committed to the repo (the workflow does this automatically) so that
+history isn't lost.** If it's ever missing, the pipeline just starts a
+fresh history from scratch rather than failing — it's a nice-to-have
+record, not something the pipeline depends on to run.
+
 ---
 
 ## One-time setup (things only you can do — GitHub account required)
@@ -125,6 +139,7 @@ it can usually diagnose and fix the script directly.
 | `.github/workflows/update-dashboard.yml` | The daily automation |
 | `baseline/player_totals.json` | **Committed** — full career totals per player. This is the club's permanent record; never delete or hand-edit it. |
 | `baseline/counted_game_ids.json` | **Committed** — PlayHQ game IDs already counted, so games are never double-counted. |
+| `milestones/milestones_log.json` | **Committed** — permanent record of every milestone ever reached, powering the "Milestones Reached" section. |
 | `players_data.json` | Generated, gitignored — the combined (baseline + new PlayHQ games) stats, machine-readable |
 | `Bonbeach-CC-Milestone-Dashboard-LIVE.html` / `index.html` | Generated, **committed** (see note below) — open either in your browser, or visit the live GitHub Pages URL |
 

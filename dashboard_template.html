@@ -245,6 +245,29 @@ Z.prototype.chain=tf,Z.prototype.commit=rf,Z.prototype.next=ef,Z.prototype.plant
   .watch-card .target b{color:var(--white);}
   .empty-note{color:var(--steel);font-size:13px;padding:20px;text-align:center;border:1px dashed var(--line);border-radius:10px;}
 
+  /* ---------- Milestones reached (recent history) ---------- */
+  .reached-scroll{
+    display:flex;gap:12px;overflow-x:auto;padding-bottom:10px;margin-bottom:36px;
+    scrollbar-width:thin;
+  }
+  .reached-scroll::-webkit-scrollbar{height:6px;}
+  .reached-scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px;}
+  .reached-card{
+    flex:0 0 208px;background:linear-gradient(160deg,var(--panel) 0%, var(--panel-2) 100%);
+    border:1px solid var(--line);border-radius:10px;padding:14px 16px 12px;
+    position:relative;overflow:hidden;
+  }
+  .reached-card::before{
+    content:"";position:absolute;top:0;left:0;bottom:0;width:4px;background:var(--amber);
+  }
+  .reached-card .pname{font-weight:700;font-size:14.5px;color:var(--white);margin:0 0 2px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .reached-card .cat{color:var(--steel);font-size:10.5px;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:8px;}
+  .reached-card .milestone-value{
+    font-family:'Teko',sans-serif;font-size:44px;font-weight:700;color:var(--amber);line-height:1;
+  }
+  .reached-card .when{font-size:11px;color:var(--steel);margin-top:4px;}
+
   /* ---------- Tabs ---------- */
   .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;}
   .tab-btn{
@@ -363,6 +386,14 @@ Z.prototype.chain=tf,Z.prototype.commit=rf,Z.prototype.next=ef,Z.prototype.plant
 
   <section>
     <div class="sec-head">
+      <h2>🎉 Milestones Reached</h2>
+      <div class="sub" id="reachedSub"></div>
+    </div>
+    <div class="reached-scroll" id="reachedScroll"></div>
+  </section>
+
+  <section>
+    <div class="sec-head">
       <h2>Player Records</h2>
       <div class="sub">Click any row to build a milestone post for that player</div>
     </div>
@@ -430,12 +461,17 @@ Z.prototype.chain=tf,Z.prototype.commit=rf,Z.prototype.next=ef,Z.prototype.plant
   </section>
 
   <footer>
-    Built for <b>Bonbeach Cricket Club</b> — combined from Batting, Bowling &amp; Fielding PlayHQ exports (25 Aug 2026).
+    Built for <b>Bonbeach Cricket Club</b> — combined from Batting, Bowling &amp; Fielding PlayHQ exports, updated automatically every day.
   </footer>
 </div>
 
 <script>
-const PLAYERS = __PLAYERS_JSON__;
+const DASHBOARD_DATA = __PLAYERS_JSON__;
+// players_data.json used to be a bare array of players; it's now an object
+// with a "players" list plus recent milestone history. This fallback keeps
+// things working even if an old-shaped file is ever loaded by mistake.
+const PLAYERS = Array.isArray(DASHBOARD_DATA) ? DASHBOARD_DATA : (DASHBOARD_DATA.players || []);
+const MILESTONES_REACHED = Array.isArray(DASHBOARD_DATA) ? [] : (DASHBOARD_DATA.milestones_reached || []);
 
 // ---------- prep ----------
 PLAYERS.forEach(p => {
@@ -486,6 +522,41 @@ function renderWatchBoard(){
   `).join('');
 }
 renderWatchBoard();
+
+// ---------- milestones reached (recent history) ----------
+function relativeDay(iso){
+  const d = new Date(iso + 'T00:00:00');
+  if(isNaN(d)) return '';
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diffDays = Math.round((today - d) / 86400000);
+  if(diffDays <= 0) return 'Today';
+  if(diffDays === 1) return 'Yesterday';
+  if(diffDays < 14) return `${diffDays} days ago`;
+  if(diffDays < 60){ const weeks = Math.round(diffDays/7); return `${weeks} week${weeks===1?'':'s'} ago`; }
+  return d.toLocaleDateString('en-AU', {day:'numeric', month:'short'});
+}
+
+document.getElementById('reachedSub').textContent = MILESTONES_REACHED.length
+  ? `${MILESTONES_REACHED.length} milestone${MILESTONES_REACHED.length===1?'':'s'} reached recently`
+  : '';
+
+function renderReachedBoard(){
+  const el = document.getElementById('reachedScroll');
+  if(!MILESTONES_REACHED.length){
+    el.innerHTML = `<div class="empty-note">No milestones reached recently — check back after the next round of games.</div>`;
+    return;
+  }
+  el.innerHTML = MILESTONES_REACHED.map(m => `
+    <div class="reached-card">
+      <div class="cat">${iconFor(m.type)} ${m.type} Milestone</div>
+      <div class="pname">${m.player}</div>
+      <div class="milestone-value">${m.value.toLocaleString()}</div>
+      <div class="when">${relativeDay(m.date)}</div>
+    </div>
+  `).join('');
+}
+renderReachedBoard();
 
 // ---------- table state ----------
 let currentTab = 'all';

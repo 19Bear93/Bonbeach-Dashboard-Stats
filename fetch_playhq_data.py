@@ -74,7 +74,7 @@ import time
 import json
 import sys
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # =========================================================================
 # CONFIG — credentials come from environment variables (see docstring above)
@@ -102,6 +102,19 @@ REQUEST_DELAY_SECONDS = 0.25            # be polite to PlayHQ's servers between 
 # them and do not hand-edit them.
 BASELINE_TOTALS_FILE = "baseline/player_totals.json"
 BASELINE_GAME_IDS_FILE = "baseline/counted_game_ids.json"
+
+# Permanent, ever-growing log of every milestone ever reached (one entry per
+# player/type/value, added the run it was first crossed). Unlike the baseline
+# files above, this one is NOT a source of truth the pipeline depends on to
+# function — if it's ever missing, the pipeline just starts a fresh history
+# rather than refusing to run. Still, it SHOULD be committed to the repo so
+# past milestones aren't lost. Lives in its own folder so it's easy to spot
+# and upload alongside baseline/ in GitHub's web UI.
+MILESTONES_LOG_FILE = "milestones/milestones_log.json"
+# How many days of recently-reached milestones to surface on the dashboard
+# itself each run (the full history keeps accumulating in the log above
+# regardless — this just controls the "recent" window shown on the site).
+MILESTONES_DISPLAY_WINDOW_DAYS = 30
 
 HEADERS = {
     "x-api-key": X_API_KEY,
@@ -493,24 +506,124 @@ def finalize(baseline_totals):
     return output
 
 
+# =========================================================================
+# Milestone tiers — module-level so both apply_milestones() (upcoming/"watch"
+# milestones) and detect_milestones_reached() (milestones actually crossed
+# this run) use the exact same thresholds.
+# =========================================================================
+MATCH_TIERS = [100, 150, 200, 250, 300, 350, 400, 450, 500]
+RUN_TIERS = [500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000,
+             5500, 6000, 6500, 7000, 7500, 8000, 8500, 9000, 9500, 10000]
+WICKET_TIERS = [100, 150, 200, 250, 300, 350, 400, 450, 500, 550]
+CATCH_TIERS = [100, 150, 200, 250, 300, 350, 400, 450, 500]
+WATCH = {"matches": 5, "runs": 100, "wickets": 10}
+
+
+def next_milestone(value, tiers, increment):
+    for t in tiers:
+        if value < t:
+            return t
+    last = tiers[-1]
+    n = last
+    while n <= value:
+        n += increment
+    return n
+
+
+def crossed_tiers(pre, post, tiers, increment):
+    """Every milestone tier value crossed going from `pre` to `post` (pre < t <= post),
+    extending the explicit tier list indefinitely by `increment` if needed."""
+    all_tiers = list(tiers)
+    n = tiers[-1]
+    while n < post:
+        n += increment
+        all_tiers.append(n)
+    return [t for t in all_tiers if pre < t <= post]
+
+
+def today_iso():
+    """Today's date (Melbourne local, matching build_dashboard.py's date-stamping
+    logic) as YYYY-MM-DD — used to date-stamp milestone log entries."""
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("Australia/Melbourne"))
+    except Exception:
+        now = datetime.now()
+    return now.strftime("%Y-%m-%d")
+
+
+def load_milestones_log():
+    """The permanent history of every milestone ever reached. Missing/corrupt
+    file just means "no history yet" — this is a nice-to-have record, not a
+    file the pipeline depends on to run correctly, so it never sys.exit()s."""
+    try:
+        with open(MILESTONES_LOG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
+def save_milestones_log(log):
+    folder = os.path.dirname(MILESTONES_LOG_FILE)
+    if folder:
+        os.makedirs(folder, exist_ok=True)
+    with open(MILESTONES_LOG_FILE, "w", encoding="utf-8") as f:
+        json.dump(log, f, indent=None)
+
+
+def detect_milestones_reached(pre_stats, output, run_date):
+    """Compare each player's stats from BEFORE this run's new games were folded
+    in (pre_stats) against their finalized stats AFTER (output), and report
+    every milestone tier actually crossed this run — for Matches, Runs,
+    Wickets, and Catches alike."""
+    output_by_key = {p["name"]: p for p in output}
+    events = []
+    for key, pre in pre_stats.items():
+        post = output_by_key.get(key)
+        if not post:
+            continue
+        checks = [
+            ("Matches", pre["matches"], post["matches"], MATCH_TIERS, 50),
+            ("Runs", pre["runs"], post["runs"], RUN_TIERS, 500),
+            ("Wickets", pre["wickets"], post["wickets"], WICKET_TIERS, 50),
+            ("Catches", pre["catches"], post["total_catches"], CATCH_TIERS, 50),
+        ]
+        for milestone_type, pre_val, post_val, tiers, increment in checks:
+            for tier in crossed_tiers(pre_val, post_val, tiers, increment):
+                events.append({
+                    "date": run_date,
+                    "player": post["display_name"],
+                    "type": milestone_type,
+                    "value": tier,
+                })
+    return events
+
+
+def recent_milestones(log, run_date, window_days=MILESTONES_DISPLAY_WINDOW_DAYS):
+    """The slice of the permanent milestones log within `window_days` of
+    run_date, newest first — what actually gets shown on the dashboard.
+    The full log keeps every milestone forever; this is just today's view
+    of "recent" so the site doesn't grow an unbounded list."""
+    try:
+        cutoff = datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=window_days)
+    except Exception:
+        cutoff = None
+
+    def in_window(entry):
+        if cutoff is None:
+            return True
+        try:
+            return datetime.strptime(entry.get("date", ""), "%Y-%m-%d") >= cutoff
+        except Exception:
+            return False
+
+    recent = [e for e in log if in_window(e)]
+    recent.sort(key=lambda e: e.get("date", ""), reverse=True)
+    return recent
+
+
 def apply_milestones(players):
     """Same milestone logic as the CSV pipeline, minus Catches (per club decision)."""
-    def next_milestone(value, tiers, increment):
-        for t in tiers:
-            if value < t:
-                return t
-        last = tiers[-1]
-        n = last
-        while n <= value:
-            n += increment
-        return n
-
-    MATCH_TIERS = [100, 150, 200, 250, 300, 350, 400, 450, 500]
-    RUN_TIERS = [500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000,
-                 5500, 6000, 6500, 7000, 7500, 8000, 8500, 9000, 9500, 10000]
-    WICKET_TIERS = [100, 150, 200, 250, 300, 350, 400, 450, 500, 550]
-    CATCH_TIERS = [100, 150, 200, 250, 300, 350, 400, 450, 500]
-    WATCH = {"matches": 5, "runs": 100, "wickets": 10}
     # Every milestone type is watched for every player, regardless of career
     # matches played. The "only 100+" rule lives in MATCH_TIERS above instead —
     # the Matches milestone itself simply doesn't start until 100, so nobody
@@ -562,7 +675,9 @@ def main():
 
     baseline_totals = load_baseline_totals()
     counted_game_ids = load_counted_game_ids()
+    milestones_log = load_milestones_log()
     print(f"Baseline: {len(baseline_totals)} players, {len(counted_game_ids)} games already counted")
+    print(f"Milestones log: {len(milestones_log)} milestones on record")
 
     players = {}       # NEW games only, this run
     games_processed = 0
@@ -613,20 +728,50 @@ def main():
     print(f"\nNew Bonbeach games this run: {games_processed}")
     print(f"Players with new activity this run: {len(players)}")
 
+    # Snapshot each active player's stats as they stood BEFORE this run's new
+    # games get folded in, so we can tell exactly which milestones (if any)
+    # they crossed as a result of today's games. Must happen before
+    # merge_into_baseline() mutates baseline_totals in place.
+    pre_stats = {}
+    for key in players.keys():
+        b = baseline_totals.get(key, {})
+        pre_stats[key] = {
+            "matches": b.get("matches", 0),
+            "runs": b.get("runs", 0),
+            "wickets": b.get("wickets", 0),
+            "catches": b.get("catches_wk", 0) + b.get("catches_nwk", 0),
+        }
+
     baseline_totals = merge_into_baseline(baseline_totals, players)
     counted_game_ids |= games_new_ids
 
     output = finalize(baseline_totals)
     output = apply_milestones(output)
 
+    run_date = today_iso()
+    new_milestone_events = detect_milestones_reached(pre_stats, output, run_date)
+    if new_milestone_events:
+        print(f"\nMilestones reached this run: {len(new_milestone_events)}")
+        for e in new_milestone_events:
+            print(f"  {e['player']} — {e['value']:,} {e['type']}")
+    milestones_log.extend(new_milestone_events)
+    milestones_reached_display = recent_milestones(milestones_log, run_date)
+
+    dashboard_payload = {
+        "players": output,
+        "milestones_reached": milestones_reached_display,
+    }
+
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(output, f, indent=None)
+        json.dump(dashboard_payload, f, indent=None)
 
     save_baseline_totals(baseline_totals)
     save_counted_game_ids(counted_game_ids)
+    save_milestones_log(milestones_log)
 
     print(f"\nDone! Wrote {len(output)} players (full career history) to {OUTPUT_FILE}")
     print(f"Baseline now covers {len(counted_game_ids)} games and {len(baseline_totals)} players.")
+    print(f"Milestones log now covers {len(milestones_log)} milestones ({len(milestones_reached_display)} shown on the dashboard, last {MILESTONES_DISPLAY_WINDOW_DAYS} days).")
     print(f"Last updated: {datetime.now().strftime('%d %b %Y %H:%M')}")
     print("\nNext step: run  python build_dashboard.py")
 
