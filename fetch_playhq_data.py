@@ -511,6 +511,11 @@ def apply_milestones(players):
     WICKET_TIERS = [100, 150, 200, 250, 300, 350, 400, 450, 500, 550]
     CATCH_TIERS = [100, 150, 200, 250, 300, 350, 400, 450, 500]
     WATCH = {"matches": 5, "runs": 100, "wickets": 10}
+    # Every milestone type is watched for every player, regardless of career
+    # matches played. The "only 100+" rule lives in MATCH_TIERS above instead —
+    # the Matches milestone itself simply doesn't start until 100, so nobody
+    # ever gets celebrated for reaching 50 games, but a Runs/Wickets alert can
+    # still fire for a player who hasn't yet played 100 games.
 
     for p in players:
         nm = next_milestone(p["matches"], MATCH_TIERS, 50)
